@@ -19,8 +19,8 @@ def publish_message(discord_url, msg):
   webhook = DiscordWebhook(url=discord_url, content=message)
   response = webhook.execute()
 
-discord_url = os.environ.get(DISCORD_URL)
-group = os.environ.get(MEETUP_GROUP)
+discord_url = os.environ.get('DISCORD_URL')
+group = os.environ.get('MEETUP_GROUP')
 if not discord_url and group:
 	print('Missing a required environment variable')
 	sys.exit(1)
