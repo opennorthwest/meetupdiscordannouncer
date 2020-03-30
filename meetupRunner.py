@@ -12,7 +12,7 @@ def get_events(group):
   return r.json()
 
 def build_message(event):
-  message = "Join us today at %s for %s.\n %s people attending so far! Sign up: %s"%(event['local_time'], event['name'], event['yes_rsvp_count'], event['link'])
+  message = "Join us today at %s for %s.\n %s people attending so far! Sign up: <%s>"%(event['local_time'], event['name'], event['yes_rsvp_count'], event['link'])
   return message
 
 def publish_message(discord_url, msg):
