@@ -26,4 +26,4 @@ jobs:
           tags: dgibbons/meetupdiscordannouncer:latest
       - name: Inspect
         run: |
-          docker image inspect myimage:latest         
+          docker image inspect dgibbons/meetupdiscordannouncer:latest
