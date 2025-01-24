@@ -1,0 +1,19 @@
+events:
+  "Boardgames!":
+    reminder: True
+    thread_id: 1332067565564072001
+  "Bar Social":
+    reminder: True
+    thread_id: 1332067798133772389
+  default:
+    reminder: True
+    thread_id: 1332418976210489386
+discord:
+  summary:
+    enabled: true
+    daily: friday
+    webhook: ${DISCORD_SUMMARY_WEBHOOK}
+  webhook: ${DISCORD_WEBHOOK}
+
+meetup:
+  group: "your-meetup-group-slug"
