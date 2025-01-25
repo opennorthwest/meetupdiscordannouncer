@@ -44,10 +44,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      - name: Get webhook version
-        id: webhook
+      - name: Get version
+        id: version_check
         run: |
-          echo "version=$(< webhook.version)" >> $GITHUB_OUTPUT
+          echo "version=$(< VERSION)" >> $GITHUB_OUTPUT
 
       - name: Set Docker image metadata
         id: docker_meta
@@ -57,9 +57,9 @@ jobs:
           flavor: |
             latest=true
           tags: |
-            ${{ steps.webhook.outputs.version }}
+            ${{ steps.version_check.outputs.version }}
           labels: |
-            org.opencontainers.image.version=${{ steps.webhook.outputs.version }}
+            org.opencontainers.image.version=${{ steps.version_check.outputs.version }}
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
