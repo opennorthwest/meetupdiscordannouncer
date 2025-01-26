@@ -1,4 +1,4 @@
 meetup-api
 requests
 discord-webhook
-yaml
+pyyaml
