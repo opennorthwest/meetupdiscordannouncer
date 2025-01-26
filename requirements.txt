@@ -1,3 +1,4 @@
 meetup-api
-requests_oauthlib
+requests
 discord-webhook
+yaml
