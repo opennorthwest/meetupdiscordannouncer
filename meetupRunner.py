@@ -5,7 +5,9 @@ import calendar
 import yaml
 import requests
 import logging
+import pytz
 from discord_webhook import DiscordWebhook
+from pytz import timezone
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -101,7 +103,7 @@ def main(dry_run=False):
     summary_webhook = config['discord']['summary'].get('webhook')
 
     events = get_events(group)
-    now = datetime.datetime.today()
+    now = datetime.datetime.today().astimezone(timezone('US/Pacific'))
     summary_messages = []
     
     if not events:
@@ -109,24 +111,23 @@ def main(dry_run=False):
 
     for event in events:
         try:
-            event_date = datetime.datetime.strptime(event['local_date'], '%Y-%m-%d')
+            event_date = datetime.datetime.strptime(event['local_date'], '%Y-%m-%d').astimezone(timezone('US/Pacific'))
             event_config = get_event_config(event['name'])
 
             logger.debug(f"Processing event: {event['name']} on {event_date} with config: {event_config}")
 
             thread_id = event_config.get('thread_id')
+            days_difference = (event_date - now).days
 
             # Weekly Reminder
-            if event_date.date() == now.date() + datetime.timedelta(days=7):
+            if days_difference == 6:
                 msg = build_weekly_msg(event, event_date)
                 summary_messages.append(msg)
-                logger.debug(msg)
                 publish_message(discord_webhook, msg, thread_id, dry_run)
 
             # Event Day Reminder
-            if event_config.get('reminder', False) and event_date.date() == now.date():
+            if event_config.get('reminder', False) and days_difference == 0:
                 msg = build_reminder_msg(event)
-                logger.debug(msg)
                 publish_message(discord_webhook, msg, thread_id, dry_run)
 
         except Exception as e:
