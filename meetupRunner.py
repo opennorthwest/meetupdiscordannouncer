@@ -6,6 +6,7 @@ import yaml
 import requests
 import logging
 import pytz
+import configargparse
 from discord_webhook import DiscordWebhook
 from pytz import timezone
 
@@ -13,18 +14,37 @@ from pytz import timezone
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Check for debug flag
-DEBUG_MODE = "--debug" in sys.argv
-if DEBUG_MODE:
+# Argument parsing
+parser = configargparse.ArgumentParser(
+    description="Meetup event reminder bot"
+)
+
+parser.add_argument(
+    "--config", is_config_file=True, help="Path to configuration file"
+)
+parser.add_argument(
+    "--debug", action="store_true", help="Enable debug mode"
+)
+parser.add_argument(
+    "--dry-run", action="store_true", help="Run in dry run mode without sending messages"
+)
+
+args = parser.parse_args()
+
+# Set logging level based on debug flag
+if args.debug:
     logger.setLevel(logging.DEBUG)
     logger.debug("Debug mode enabled.")
 
-# Load configuration
+# Load configuration with environment variable substitution
 def load_config():
     try:
-        with open("config.yaml", "r") as file:
-            config = yaml.safe_load(file)
-            logger.debug(f"Loaded config: {config}")
+        with open(args.config or "config.yaml", "r") as file:
+            raw_config = file.read()
+            # Expand environment variables
+            expanded_config = os.path.expandvars(raw_config)
+            config = yaml.safe_load(expanded_config)
+            logger.debug(f"Loaded config with env vars: {config}")
             return config
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
@@ -40,7 +60,7 @@ def validate_config():
         logger.error("Missing Meetup group in configuration.")
         sys.exit(1)
     if config['discord'].get('summary', {}).get('enabled', False) and 'webhook' not in config['discord']['summary']:
-        print("Missing summary Discord webhook in configuration while summary is enabled.")
+        logger.error("Missing summary Discord webhook in configuration while summary is enabled.")
         sys.exit(1)
 
 validate_config()
@@ -96,14 +116,14 @@ def get_event_config(event_name):
     logger.debug(f"No specific match for event '{event_name}', using defaults.")
     return config['events'].get("default", {})
 
-def main(dry_run=False):
+def main():
     logger.info("Starting event processing script...")
     discord_webhook = config['discord']['webhook']
     group = config['meetup']['group']
     summary_webhook = config['discord']['summary'].get('webhook')
-
+    pacific_tz = pytz.timezone('America/Los_Angeles')
     events = get_events(group)
-    now = datetime.datetime.today().astimezone(timezone('US/Pacific'))
+    now = pacific_tz.localize(datetime.datetime.today().replace(hour=1))
     summary_messages = []
     
     if not events:
@@ -111,24 +131,28 @@ def main(dry_run=False):
 
     for event in events:
         try:
-            event_date = datetime.datetime.strptime(event['local_date'], '%Y-%m-%d').astimezone(timezone('US/Pacific'))
+            datetime_str = f"{event['local_date']} {event['local_time']}"
+            event_date = pacific_tz.localize(datetime.datetime.strptime(datetime_str, '%Y-%m-%d %H:%M'))
             event_config = get_event_config(event['name'])
 
             logger.debug(f"Processing event: {event['name']} on {event_date} with config: {event_config}")
 
             thread_id = event_config.get('thread_id')
             days_difference = (event_date - now).days
-
-            # Weekly Reminder
-            if days_difference == 6:
+            logger.debug(f"Timing: Today is {now} event_date is {event_date}, Date difference is {days_difference}")
+            # Gather the events for the week
+            if days_difference <= 7:
                 msg = build_weekly_msg(event, event_date)
                 summary_messages.append(msg)
-                publish_message(discord_webhook, msg, thread_id, dry_run)
+                # Weekly Reminder
+                if days_difference == 7:
+                    publish_message(discord_webhook, msg, thread_id, args.dry_run)
 
             # Event Day Reminder
             if event_config.get('reminder', False) and days_difference == 0:
                 msg = build_reminder_msg(event)
-                publish_message(discord_webhook, msg, thread_id, dry_run)
+                logger.debug(msg)
+                publish_message(discord_webhook, msg, thread_id, args.dry_run)
 
         except Exception as e:
             logger.error(f"Error processing event {event}: {e}")
@@ -136,10 +160,9 @@ def main(dry_run=False):
     # Summary Message
     if is_summary_day() and config['discord']['summary']['enabled']:
         summary = "Upcoming Events This Week:\n" + "\n".join(summary_messages)
-        publish_message(summary_webhook, summary, None, dry_run)
+        publish_message(summary_webhook, summary, None, args.dry_run)
 
     logger.info("Event processing complete.")
 
 if __name__ == "__main__":
-    dry_run_mode = '--dry-run' in sys.argv
-    main(dry_run_mode)
+    main()
