@@ -120,11 +120,13 @@ def main(dry_run=False):
             if event_date.date() == now.date() + datetime.timedelta(days=7):
                 msg = build_weekly_msg(event, event_date)
                 summary_messages.append(msg)
+                logger.debug(msg)
                 publish_message(discord_webhook, msg, thread_id, dry_run)
 
             # Event Day Reminder
             if event_config.get('reminder', False) and event_date.date() == now.date():
                 msg = build_reminder_msg(event)
+                logger.debug(msg)
                 publish_message(discord_webhook, msg, thread_id, dry_run)
 
         except Exception as e:
