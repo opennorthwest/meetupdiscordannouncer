@@ -1,4 +1,3 @@
-import datetime
 import os
 import sys
 import calendar
@@ -9,6 +8,14 @@ import pytz
 import configargparse
 from discord_webhook import DiscordWebhook
 from pytz import timezone
+from icalendar import Calendar
+from datetime import datetime
+from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:
+    from dateutil import tz
+    ZoneInfo = tz.gettz  # zoneinfo substitute for older Python
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -56,8 +63,8 @@ def validate_config():
     if 'discord' not in config or 'webhook' not in config['discord']:
         logger.error("Missing Discord webhook in configuration.")
         sys.exit(1)
-    if 'meetup' not in config or 'group' not in config['meetup']:
-        logger.error("Missing Meetup group in configuration.")
+    if 'meetup' not in config or 'ical' not in config['meetup']:
+        logger.error("Missing Meetup ical in configuration.")
         sys.exit(1)
     if config['discord'].get('summary', {}).get('enabled', False) and 'webhook' not in config['discord']['summary']:
         logger.error("Missing summary Discord webhook in configuration while summary is enabled.")
@@ -65,27 +72,69 @@ def validate_config():
 
 validate_config()
 
-def get_events(group):
-    url = f"https://api.meetup.com/{group}/events?&sign=true&photo-host=public&page=10"
-    logger.debug(f"Fetching events from URL: {url}")
-
+def get_events_from_ical(url):
     try:
-        res = requests.get(url, timeout=10)
+        res = requests.get(url)
         res.raise_for_status()
-        events = res.json()
-        logger.debug(f"Received events: {events}")
-        return events
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching events: {e}")
+        cal = Calendar.from_ical(res.content)
+    except Exception as e:
+        logger.error(f"Failed to load or parse iCal feed: {e}")
         return []
 
-def build_weekly_msg(event, event_date):
-    msg = f"Don't forget to sign up for {event['name']} on {calendar.day_name[event_date.weekday()]}.\nRSVP here: <{event['link']}>"
+    events = []
+    default_tz = ZoneInfo(config['timezone'])
+
+    for component in cal.walk('VEVENT'):
+        try:
+            status = component.get('STATUS')
+            if status and status != 'CONFIRMED':
+                continue
+
+            summary = str(component.get('SUMMARY'))
+            start = component.get('DTSTART').dt
+            url = str(component.get('URL'))
+
+            if isinstance(start, datetime):
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=default_tz)
+                else:
+                    start = start.astimezone(default_tz)
+            else:
+                # Handle all-day events
+                start = datetime.combine(start, datetime.min.time(), tzinfo=default_tz)
+
+            if start >= datetime.now(tz=default_tz):
+                events.append({
+                    'name': summary,
+                    'time': start,
+                    'url': url
+                })
+        except Exception as e:
+            logger.warning(f"Failed to parse event: {e}")
+
+    events.sort(key=lambda e: e['time'])
+    return events
+
+
+def build_weekly_msg(event):
+    event_date = event['time']
+    day_name = calendar.day_name[event_date.weekday()]
+    date_str = event_date.strftime("%B %d")  # e.g., "March 21"
+    time_str = event_date.strftime("%I:%M %p")  # e.g., "06:00 PM"
+
+    msg = (
+        f"Don't forget to sign up for **{event['name']}** on {day_name}, {date_str} at {time_str}.\n"
+        f"RSVP here: <{event['url']}>"
+    )
     logger.debug(f"Weekly message: {msg}")
     return msg
 
 def build_reminder_msg(event):
-    msg = f"Join us today at {event['local_time']} for {event['name']}.\n{event['yes_rsvp_count']} people attending so far! Sign up: <{event['link']}>"
+    time_str = event['time'].strftime("%I:%M %p")
+    msg = (
+        f"Join us today at {time_str} for **{event['name']}**.\n"
+        f"Sign up: <{event['url']}>"
+    )
     logger.debug(f"Reminder message: {msg}")
     return msg
 
@@ -101,7 +150,7 @@ def publish_message(discord_webhook, msg, thread_id=None, dry_run=False):
             logger.error(f"Failed to send Discord message: {e}")
 
 def is_summary_day():
-    today = calendar.day_name[datetime.datetime.today().weekday()].lower()
+    today = calendar.day_name[datetime.today().weekday()].lower()
     logger.debug(f"Checking summary day: Today is {today}")
     return today == config['discord']['summary']['daily']
 
@@ -119,11 +168,11 @@ def get_event_config(event_name):
 def main():
     logger.info("Starting event processing script...")
     discord_webhook = config['discord']['webhook']
-    group = config['meetup']['group']
+    group = config['meetup']['ical']
     summary_webhook = config['discord']['summary'].get('webhook')
-    pacific_tz = pytz.timezone('America/Los_Angeles')
-    events = get_events(group)
-    now = pacific_tz.localize(datetime.datetime.today().replace(hour=1))
+    tz = ZoneInfo(config['timezone'])
+    events = get_events_from_ical(group)
+    now = datetime.now(tz).replace(hour=1)
     summary_messages = []
     
     if not events:
@@ -131,8 +180,7 @@ def main():
 
     for event in events:
         try:
-            datetime_str = f"{event['local_date']} {event['local_time']}"
-            event_date = pacific_tz.localize(datetime.datetime.strptime(datetime_str, '%Y-%m-%d %H:%M'))
+            event_date = event['time']
             event_config = get_event_config(event['name'])
 
             logger.debug(f"Processing event: {event['name']} on {event_date} with config: {event_config}")
@@ -142,7 +190,7 @@ def main():
             logger.debug(f"Timing: Today is {now} event_date is {event_date}, Date difference is {days_difference}")
             # Gather the events for the week
             if days_difference <= 7:
-                msg = build_weekly_msg(event, event_date)
+                msg = build_weekly_msg(event)
                 summary_messages.append(msg)
                 # Weekly Reminder
                 if days_difference == 7:

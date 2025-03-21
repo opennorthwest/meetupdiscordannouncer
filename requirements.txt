@@ -4,3 +4,4 @@ discord-webhook
 pyyaml
 pytz
 configargparse
+icalendar
